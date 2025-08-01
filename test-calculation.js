@@ -1,129 +1,88 @@
-import fs from 'fs';
+const fs = require('fs');
 
-// Define PolynomialSecretSharing class (converted from TypeScript)
-class PolynomialSecretSharing {
-  constructor() {
-    this.MOD = BigInt(1000000007);
-  }
+const MOD = 1000000007n;
 
-  // Convert value from given base to decimal using BigInt
-  convertFromBase(value, base) {
-    return BigInt(parseInt(value, base));
-  }
+// Base conversion for BigInt (works for bases > 10 and large strings)
+function parseBigIntFromBase(str, base) {
+    const b = BigInt(base);
+    let result = 0n;
+    for (const digit of str.toLowerCase()) {
+        let val;
+        if (digit >= '0' && digit <= '9') val = BigInt(digit);
+        else val = BigInt(digit.charCodeAt(0) - 'a'.charCodeAt(0) + 10);
+        result = result * b + val;
+    }
+    return result;
+}
 
-  // Extended Euclidean Algorithm for modular inverse
-  modInverse(a, m) {
-    if (a < BigInt(0)) a = (a % m + m) % m;
-    let [old_r, r] = [a, m];
-    let [old_s, s] = [BigInt(1), BigInt(0)];
+// Modular inverse using Extended Euclidean Algorithm
+function modInverse(a, mod) {
+    let m0 = mod, t, q;
+    let x0 = 0n, x1 = 1n;
+    if (mod === 1n) return 0n;
 
-    while (r !== BigInt(0)) {
-      const quotient = old_r / r;
-      [old_r, r] = [r, old_r - quotient * r];
-      [old_s, s] = [s, old_s - quotient * s];
+    a = (a % mod + mod) % mod;
+
+    while (a > 1n) {
+        q = a / mod;
+        t = mod;
+        mod = a % mod;
+        a = t;
+        t = x0;
+        x0 = x1 - q * x0;
+        x1 = t;
     }
 
-    return old_s < BigInt(0) ? old_s + m : old_s;
-  }
+    return x1 < 0n ? x1 + m0 : x1;
+}
 
-  // Lagrange interpolation at x=0 - identical to Java implementation
-  lagrangeInterpolationAtZero(points) {
-    let result = BigInt(0);
+// Lagrange Interpolation at x=0 (mod MOD)
+function lagrangeInterpolationAtZero(points, k) {
+    let result = 0n;
 
-    for (let i = 0; i < points.length; i++) {
-      const xi = points[i].x;
-      const yi = points[i].y;
+    for (let i = 0; i < k; i++) {
+        const xi = points[i].x;
+        const yi = points[i].y;
 
-      let num = BigInt(1);
-      let den = BigInt(1);
+        let num = 1n;
+        let den = 1n;
 
-      for (let j = 0; j < points.length; j++) {
-        if (i === j) continue;
-        const xj = points[j].x;
+        for (let j = 0; j < k; j++) {
+            if (i === j) continue;
+            const xj = points[j].x;
+            num = (num * (-xj)) % MOD;
+            den = (den * (xi - xj)) % MOD;
+        }
 
-        num = (num * (-xj)) % this.MOD;
-        den = (den * (xi - xj)) % this.MOD;
-      }
-
-      if (num < BigInt(0)) num = (num % this.MOD + this.MOD) % this.MOD;
-      if (den < BigInt(0)) den = (den % this.MOD + this.MOD) % this.MOD;
-
-      const denInv = this.modInverse(den, this.MOD);
-      const term = (((yi * num) % this.MOD) * denInv) % this.MOD;
-      result = (result + term) % this.MOD;
+        const inv = modInverse(den, MOD);
+        const term = (((yi * num) % MOD) * inv) % MOD;
+        result = (result + term + MOD) % MOD;
     }
 
-    return result < BigInt(0) ? (result % this.MOD + this.MOD) % this.MOD : result;
-  }
+    return result;
+}
 
-  // Main processing function
-  processJSON(jsonData) {
-    try {
-      const k = jsonData.keys.k;
-      const points = [];
+// Load and parse JSON input
+function parseInput(filename) {
+    const raw = fs.readFileSync(filename, 'utf8');
+    const data = JSON.parse(raw);
+    const k = data.keys.k;
+    const points = [];
 
-      // Process each point
-      for (const [key, entry] of Object.entries(jsonData)) {
+    for (const key in data) {
         if (key === 'keys') continue;
-
         const x = BigInt(key);
-        const base = parseInt(entry.base);
-        const value = entry.value;
-        const y = this.convertFromBase(value, base);
-
+        const base = parseInt(data[key].base);
+        const y = parseBigIntFromBase(data[key].value, base);
         points.push({ x, y });
-      }
-
-      if (points.length < k) {
-        throw new Error('Not enough points to interpolate');
-      }
-
-      // Sort points and select first k
-      points.sort((a, b) => (a.x < b.x ? -1 : 1));
-      const selectedPoints = points.slice(0, k);
-
-      // Calculate secret
-      const secret = this.lagrangeInterpolationAtZero(selectedPoints);
-
-      return {
-        success: true,
-        secret: secret.toString(),
-        pointsUsed: k,
-        totalPoints: points.length,
-        points: selectedPoints.map((p) => ({
-          x: p.x.toString(),
-          y: p.y.toString(),
-        })),
-      };
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message || 'Unknown error',
-      };
     }
-  }
+
+    // Sort by x and pick first k points
+    points.sort((a, b) => (a.x < b.x ? -1 : 1));
+    return { k, points: points.slice(0, k) };
 }
 
-// Test with the provided JSON
-const inputData = JSON.parse(fs.readFileSync('input.json', 'utf8'));
-const polynomial = new PolynomialSecretSharing();
-const result = polynomial.processJSON(inputData);
-
-console.log('\n=== Node.js Polynomial Secret Sharing Test ===');
-console.log('Input JSON loaded successfully with', Object.keys(inputData).length - 1, 'points');
-console.log('Required k =', inputData.keys.k);
-console.log('\nCalculation Result:');
-console.log('Success:', result.success);
-
-if (result.success) {
-  console.log('✅ Constant term (c) =', result.secret);
-  console.log('Points used:', result.pointsUsed, 'of', result.totalPoints);
-  console.log('\nPoints selected for calculation:');
-  result.points.forEach((point, i) => {
-    console.log(`  Point ${i + 1}: x=${point.x}, y=${point.y}`);
-  });
-} else {
-  console.log('❌ Error:', result.error);
-}
-
-console.log('\n=== Test Complete ===\n');
+// Main execution
+const { k, points } = parseInput('input.json');
+const secret = lagrangeInterpolationAtZero(points, k);
+console.log("✅ Secret (constant term at x=0):", secret.toString());
